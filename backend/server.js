@@ -50,6 +50,8 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : [
     'https://sa.wiserconsulting.info',
+    'https://barakzai.wiserconsulting.info',
+    'https://www.barakzai.wiserconsulting.info',
     'http://localhost:3000', // Allow local development
     'http://localhost:5173', // Allow Vite dev server
     process.env.FRONTEND_URL // Allow from environment variable if set
