@@ -50,8 +50,6 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : [
     'https://sa.wiserconsulting.info',
-    'https://barakzai.wiserconsulting.info',
-    'https://www.barakzai.wiserconsulting.info',
     'http://localhost:3000', // Allow local development
     'http://localhost:5173', // Allow Vite dev server
     process.env.FRONTEND_URL // Allow from environment variable if set
@@ -171,6 +169,7 @@ app.use('/api/account-ledger', require('./routes/accountLedger'));
 app.use('/api/images', require('./routes/images'));
 app.use('/api/backdate-report', require('./routes/backdateReport'));
 app.use('/api/stock-movements', require('./routes/stockMovements'));
+app.use('/api/stock-ledger', require('./routes/stockLedger'));
 app.use('/api/warehouses', require('./routes/warehouses'));
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/attendance', require('./routes/attendance'));
