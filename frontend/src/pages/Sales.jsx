@@ -73,7 +73,7 @@ const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPu
   const [getLastPurchasePrices] = useGetLastPurchasePricesMutation();
 
   const { data: productsData, isLoading: productsLoading, error: productsError, refetch: refetchProducts } = useGetProductsQuery(
-    { limit: 100, status: 'active' },
+    { limit: 999999, status: 'active' },
     {
       keepPreviousData: true,
       staleTime: 0, // Always consider data stale to get fresh stock levels

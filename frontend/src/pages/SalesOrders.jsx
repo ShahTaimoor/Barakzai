@@ -339,7 +339,7 @@ const SalesOrders = () => {
 
   // Fetch all active products for client-side fuzzy search
   const { data: allProductsData, isLoading: productsLoading, refetch: refetchProducts } = useGetProductsQuery(
-    { limit: 100, status: 'active' },
+    { limit: 999999, status: 'active' },
     {
       keepPreviousData: true,
       staleTime: 0, // Always consider data stale to get fresh stock levels
