@@ -831,7 +831,7 @@ export const Sales = ({ tabId, editData }) => {
   );
 
   const { data: customersData, isLoading: customersLoading, refetch: refetchCustomers } = useGetCustomersQuery(
-    { limit: 1000 },
+    { limit: 999999 },
     {
       staleTime: 0, // Always consider data stale to get fresh credit information
       refetchOnMountOrArgChange: true // Refetch when component mounts or params change

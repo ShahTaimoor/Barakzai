@@ -327,7 +327,7 @@ const SalesOrders = () => {
 
   // Fetch customers for dropdown
   const { data: customersData, isLoading: customersLoading } = useGetCustomersQuery(
-    { limit: 1000 },
+    { limit: 999999 },
     {
       staleTime: 0, // Always consider data stale to get fresh credit information
       refetchOnMountOrArgChange: true // Refetch when component mounts or params change
