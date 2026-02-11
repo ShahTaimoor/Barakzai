@@ -84,7 +84,7 @@ class PurchaseOrderService {
    */
   async getPurchaseOrders(queryParams) {
     const getAllPurchaseOrders = queryParams.all === 'true' || queryParams.all === true ||
-                                (queryParams.limit && parseInt(queryParams.limit) >= 999999);
+      (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
     const page = getAllPurchaseOrders ? 1 : (parseInt(queryParams.page) || 1);
     const limit = getAllPurchaseOrders ? 999999 : (parseInt(queryParams.limit) || 20);
@@ -97,17 +97,30 @@ class PurchaseOrderService {
       getAll: getAllPurchaseOrders,
       sort: { createdAt: -1 },
       populate: [
-        { path: 'supplier', select: 'companyName contactPerson email phone businessType currentBalance pendingBalance addresses' },
+        { path: 'supplier', select: 'companyName contactPerson email phone businessType openingBalance addresses' },
         { path: 'items.product', select: 'name description pricing inventory' },
         { path: 'createdBy', select: 'firstName lastName email' },
         { path: 'lastModifiedBy', select: 'firstName lastName email' }
       ]
     });
 
-    // Transform names to uppercase
+    // Fetch dynamic balances from ledger for all suppliers in this page
+    const supplierIds = result.purchaseOrders
+      .filter(po => po.supplier)
+      .map(po => po.supplier._id.toString());
+
+    const balanceMap = await AccountingService.getBulkSupplierBalances(supplierIds);
+
+    // Transform names to uppercase and attach dynamic balances
     result.purchaseOrders.forEach(po => {
       if (po.supplier) {
         po.supplier = this.transformSupplierToUppercase(po.supplier);
+        const ledgerBalance = balanceMap.get(po.supplier._id.toString()) || 0;
+        const netBalance = (po.supplier.openingBalance || 0) + ledgerBalance;
+
+        po.supplier.currentBalance = netBalance;
+        po.supplier.pendingBalance = netBalance > 0 ? netBalance : 0;
+        po.supplier.advanceBalance = netBalance < 0 ? Math.abs(netBalance) : 0;
       }
       if (po.items && Array.isArray(po.items)) {
         po.items.forEach(item => {
@@ -128,23 +141,28 @@ class PurchaseOrderService {
    */
   async getPurchaseOrderById(id) {
     const purchaseOrder = await purchaseOrderRepository.findById(id);
-    
+
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
     }
 
     // Populate related fields
     await purchaseOrder.populate([
-      { path: 'supplier', select: 'companyName contactPerson email phone businessType paymentTerms currentBalance pendingBalance addresses' },
+      { path: 'supplier', select: 'companyName contactPerson email phone businessType paymentTerms openingBalance addresses' },
       { path: 'items.product', select: 'name description pricing inventory' },
       { path: 'createdBy', select: 'firstName lastName email' },
       { path: 'lastModifiedBy', select: 'firstName lastName email' },
       { path: 'conversions.convertedBy', select: 'firstName lastName email' }
     ]);
 
-    // Transform names to uppercase
+    // Transform names to uppercase and attach dynamic balance
     if (purchaseOrder.supplier) {
       purchaseOrder.supplier = this.transformSupplierToUppercase(purchaseOrder.supplier);
+      const balance = await AccountingService.getSupplierBalance(purchaseOrder.supplier._id);
+
+      purchaseOrder.supplier.currentBalance = balance;
+      purchaseOrder.supplier.pendingBalance = balance > 0 ? balance : 0;
+      purchaseOrder.supplier.advanceBalance = balance < 0 ? Math.abs(balance) : 0;
     }
     if (purchaseOrder.items && Array.isArray(purchaseOrder.items)) {
       purchaseOrder.items.forEach(item => {
@@ -172,20 +190,8 @@ class PurchaseOrderService {
 
     const purchaseOrder = await purchaseOrderRepository.create(purchaseOrderData);
 
-    // Update supplier pending balance for unpaid purchase orders
-    if (purchaseOrder.supplier && purchaseOrder.total > 0) {
-      try {
-        const supplier = await supplierRepository.findById(purchaseOrder.supplier);
-        if (supplier) {
-          await supplierRepository.update(purchaseOrder.supplier, {
-            $inc: { pendingBalance: purchaseOrder.total }
-          });
-        }
-      } catch (error) {
-        // Don't fail the purchase order creation if supplier update fails
-        console.error('Error updating supplier pending balance:', error);
-      }
-    }
+    // Note: Manual increment of supplier.pendingBalance removed.
+    // Balances are now dynamically derived from the Account Ledger transactions.
 
     // Populate related fields
     await purchaseOrder.populate([
@@ -402,6 +408,68 @@ class PurchaseOrderService {
       },
       availableItems
     };
+  }
+
+  /**
+   * Automatically create a purchase invoice from a purchase order
+   * @param {object} purchaseOrder - Purchase order object
+   * @param {string} userId - User ID performing the action
+   * @param {Array} convertItems - Specific items to convert (optional, if null converts all PO items)
+   * @returns {Promise<object>}
+   */
+  async createInvoiceFromPurchaseOrder(purchaseOrder, userId, convertItems = null) {
+    const PurchaseInvoice = require('../models/PurchaseInvoice');
+
+    // Ensure supplier is populated to get info
+    if (purchaseOrder.supplier && !purchaseOrder.supplier.companyName) {
+      await purchaseOrder.populate('supplier');
+    }
+
+    const items = convertItems || purchaseOrder.items;
+
+    // Calculate subtotal for the items being converted
+    const subtotal = items.reduce((sum, item) => sum + (item.quantity * (item.costPerUnit || item.unitCost || 0)), 0);
+
+    const invoiceData = {
+      supplier: purchaseOrder.supplier?._id || purchaseOrder.supplier,
+      supplierInfo: purchaseOrder.supplier ? {
+        name: purchaseOrder.supplier.contactPerson?.name || purchaseOrder.supplier.companyName,
+        email: purchaseOrder.supplier.email || '',
+        phone: purchaseOrder.supplier.phone || '',
+        companyName: purchaseOrder.supplier.companyName || '',
+        address: purchaseOrder.supplier.address || ''
+      } : null,
+      items: (items || []).map(item => ({
+        product: item.product,
+        productName: item.displayName || 'Product',
+        quantity: item.quantity,
+        unitCost: item.costPerUnit || item.unitCost || 0,
+        totalCost: item.quantity * (item.costPerUnit || item.unitCost || 0)
+      })),
+      pricing: {
+        subtotal: subtotal,
+        discountAmount: 0,
+        taxAmount: 0, // Simplified tax handling for partial conversions
+        isTaxExempt: purchaseOrder.isTaxExempt || true,
+        total: subtotal
+      },
+      payment: {
+        status: 'pending',
+        method: 'credit',
+        paidAmount: 0,
+        isPartialPayment: false
+      },
+      expectedDelivery: purchaseOrder.expectedDelivery,
+      notes: purchaseOrder.notes || `Generated from Purchase Order ${purchaseOrder.poNumber}`,
+      terms: purchaseOrder.terms,
+      status: 'confirmed',
+      confirmedDate: new Date(),
+      createdBy: userId,
+      invoiceDate: new Date()
+    };
+
+    const invoice = new PurchaseInvoice(invoiceData);
+    return await invoice.save();
   }
 }
 
